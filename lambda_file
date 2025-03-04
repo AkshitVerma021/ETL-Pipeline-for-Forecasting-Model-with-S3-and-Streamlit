@@ -1,0 +1,47 @@
+import boto3
+import pandas as pd
+import io
+
+# S3 Client
+s3 = boto3.client('s3')
+
+# Bucket & File Information
+BUCKET_NAME = "<BUCKET NAME WHICH YOU WANT>"
+RAW_FOLDER = "<FOLDER FOR USER TO UPLOAD FILE/>"
+PROCESSED_FOLDER = "<FOLDER FOR PROCESSED DATA/>"
+
+def simple_moving_average(df, column, window=3):
+    """ Apply Simple Moving Average (SMA) for forecasting. """
+    df["forecast"] = df[column].rolling(window=window, min_periods=1).mean()
+    return df
+
+def lambda_handler(event, context):
+    # Get uploaded file information
+    file_obj = event['Records'][0]
+    file_name = file_obj['s3']['object']['key']
+    
+    # Download file from S3
+    response = s3.get_object(Bucket=BUCKET_NAME, Key=file_name)
+    data = response['Body'].read()
+    
+    # Read CSV into DataFrame
+    df = pd.read_csv(io.BytesIO(data))
+    
+    # Basic Data Cleaning
+    df.dropna(inplace=True)  # Remove missing values
+    df.columns = df.columns.str.strip().str.lower()  # Normalize column names
+    
+    # Forecasting - Apply SMA (Change column name based on your dataset)
+    time_series_column = df.columns[1]  # Assuming 2nd column has time series data
+    df = simple_moving_average(df, time_series_column)
+
+    # Save processed data back to S3
+    processed_file = file_name.replace(RAW_FOLDER, PROCESSED_FOLDER)
+    output_buffer = io.StringIO()
+    df.to_csv(output_buffer, index=False)
+    s3.put_object(Bucket=BUCKET_NAME, Key=processed_file, Body=output_buffer.getvalue())
+    
+    return {
+        "statusCode": 200,
+        "body": f"File {file_name} processed successfully with forecasting and saved to {processed_file}."
+    }
